@@ -131,8 +131,9 @@ const F = [
 const PUBLIC = window.CFA_PUBLIC === true;
 let D = null, G = [];
 const KEY = "cfa1-app-v2";
-let S = {cards:{}, quiz:{}, mods:{}, wrong:[]};
+let S = {cards:{}, quiz:{}, mods:{}, wrong:[], pp:{}};
 try { const s = localStorage.getItem(KEY); if (s) S = Object.assign(S, JSON.parse(s)); } catch (e) {}
+S.pp = S.pp || {};
 function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
 const $ = id => document.getElementById(id);
 const app = $("app");
@@ -172,7 +173,7 @@ function home(){
    <div class="bar"><i style="width:${s.pct}%"></i></div>
    <div class="stat"><span>${s.right}/${s.nq} quiz</span><span>${s.mods}/${t.mods.length} LMs</span><span>${s.pct}%</span></div></div>`; }).join("")}</div>
   <div class="row" style="margin-top:18px"><button class="btn" id="rs">Reset progress</button></div>`;
-  $("rs").onclick = () => { const d = document.createElement("div"); d.className = "row"; d.innerHTML = `<span>Clear all progress?</span><button class="btn pri" id="ry">Yes, reset</button><button class="btn" id="rn">Cancel</button>`; app.appendChild(d); $("ry").onclick = () => { S = {cards:{}, quiz:{}, mods:{}, wrong:[]}; save(); go("home"); }; $("rn").onclick = () => d.remove(); };
+  $("rs").onclick = () => { const d = document.createElement("div"); d.className = "row"; d.innerHTML = `<span>Clear all progress?</span><button class="btn pri" id="ry">Yes, reset</button><button class="btn" id="rn">Cancel</button>`; app.appendChild(d); $("ry").onclick = () => { S = {cards:{}, quiz:{}, mods:{}, wrong:[], pp:{}}; save(); go("home"); }; $("rn").onclick = () => d.remove(); };
 }
 
 function topicView(id){
@@ -185,15 +186,101 @@ function topicView(id){
 }
 
 function paneMods(t){
-  $("pane").innerHTML = t.mods.map(m => {
+  $("pane").innerHTML = `<p class="sub" style="margin:0 0 12px">For each module: ① read the notes, ② flip the flashcards, ③ take the quiz, ④ do the official practice problems in your book and grade them here. Tick the box when done.</p>` + t.mods.map(m => {
     const nq = qs(t).filter(x => x.q[0] === m.n).length, nc = cs(t).filter(x => x.c[0] === m.n).length, ng = PUBLIC ? 0 : gl(t, m.n).length;
     const k = t.id + ":" + m.n;
     return `<div class="card" style="margin-bottom:10px"><div class="row" style="margin:0"><label style="display:flex;gap:8px;align-items:flex-start;flex:1"><input type="checkbox" data-k="${k}" ${S.mods[k] ? "checked" : ""} style="margin-top:5px"><span><b>LM${m.n} · ${esc(m.t)}</b><br><span class="pill">${src(t, m.n)}</span></span></label></div>
     <details style="margin-top:8px"><summary class="pill" style="cursor:pointer">Learning outcomes (${m.lo.length})</summary><ul style="margin:6px 0 0;padding-left:20px">${m.lo.map(l => `<li>${esc(l)}</li>`).join("")}</ul></details>
-    <div class="row"><button class="btn" data-a="q" data-n="${m.n}" ${nq ? "" : "disabled"}>Quiz (${nq})</button><button class="btn" data-a="c" data-n="${m.n}" ${nc + ng ? "" : "disabled"}>Cards (${nc + ng})</button></div></div>`;
+    <div class="row"><button class="btn pri" data-a="l" data-n="${m.n}">① Learn</button><button class="btn" data-a="c" data-n="${m.n}" ${nc + ng ? "" : "disabled"}>② Cards (${nc + ng})</button><button class="btn" data-a="q" data-n="${m.n}" ${nq ? "" : "disabled"}>③ Quiz (${nq})</button>${pinfo(t, m.n) ? `<button class="btn" data-a="p" data-n="${m.n}">④ Book practice ${ppScore(t, m.n)}</button>` : ""}</div></div>`;
   }).join("");
   $("pane").querySelectorAll("input[type=checkbox]").forEach(c => c.onchange = () => { S.mods[c.dataset.k] = c.checked; save(); });
-  $("pane").querySelectorAll("button[data-a]").forEach(b => b.onclick = () => { const n = +b.dataset.n; b.dataset.a === "q" ? paneQuiz(t, n) : paneCards(t, n); window.scrollTo(0, 0); });
+  $("pane").querySelectorAll("button[data-a]").forEach(b => b.onclick = () => { const n = +b.dataset.n; ({l: paneLearn, c: paneCards, q: paneQuiz, p: panePractice})[b.dataset.a](t, n); window.scrollTo(0, 0); });
+}
+
+
+function paneLearn(t, n){
+  const m = mod(t, n), notes = (D.N[t.id] || {})[n] || [];
+  const body = notes.map(l => l.startsWith("## ") ? `<h3 style="margin:18px 0 6px;font-size:15px">${esc(l.slice(3))}</h3>`
+    : l.startsWith("= ") ? `<div class="mono" style="background:var(--acc2);padding:8px 10px;border-radius:8px;margin:6px 0">${esc(l.slice(2))}</div>`
+    : `<p style="margin:6px 0">• ${esc(l)}</p>`).join("");
+  const i = t.mods.findIndex(x => x.n === n), nxt = t.mods[i + 1];
+  $("pane").innerHTML = `<div class="card"><span class="tag">${src(t, n)}</span><h3 style="margin:4px 0 2px">LM${n} · ${esc(m.t)}</h3>
+    <details style="margin:8px 0"><summary class="pill" style="cursor:pointer">Learning outcomes (${m.lo.length})</summary><ul style="margin:6px 0 0;padding-left:20px">${m.lo.map(l => `<li>${esc(l)}</li>`).join("")}</ul></details>
+    ${body || "<p>No notes yet.</p>"}
+    <p class="pill" style="margin-top:16px">Notes are a summary. For depth, read the pages above in your curriculum volume.</p></div>
+    <div class="row"><button class="btn" id="bk">← Modules</button><span class="sp"></span><button class="btn pri" id="toC">② Flashcards →</button><button class="btn" id="toQ">③ Quiz →</button></div>
+    ${nxt ? `<div class="row"><span class="sp"></span><button class="btn" id="nm">Next module: LM${nxt.n} →</button></div>` : ""}`;
+  $("bk").onclick = () => paneMods(t);
+  $("toC").onclick = () => { paneCards(t, n); window.scrollTo(0, 0); };
+  $("toQ").onclick = () => { paneQuiz(t, n); window.scrollTo(0, 0); };
+  if (nxt) $("nm").onclick = () => { paneLearn(t, nxt.n); window.scrollTo(0, 0); };
+}
+
+
+const pinfo = (t, n) => (D.P && D.P[t.id] || {})[n];
+function ppScore(t, n){ const P = pinfo(t, n); if (!P) return ""; let done = 0, ok = 0;
+  for (let i = 1; i <= P.n; i++) { const v = S.pp[t.id + ":" + n + ":" + i]; if (v) { done++; if (v === "ok" || v === P.a[i - 1]) ok++; } }
+  return done ? `(${ok}/${done})` : `(${P.n})`; }
+function panePractice(t, n){
+  const P = pinfo(t, n), m = mod(t, n);
+  const row = i => { const key = t.id + ":" + n + ":" + i, a = P.a[i - 1], v = S.pp[key];
+    if (a === "-") return `<div class="mod"><b style="width:34px">${i}.</b><span class="sp pill">Open-ended or no key found. Check the solution, then mark:</span>
+      <button class="btn ${v === "ok" ? "pri" : ""}" data-i="${i}" data-v="ok">✓</button><button class="btn ${v === "x" ? "pri" : ""}" data-i="${i}" data-v="x">✗</button></div>`;
+    const res = v ? (v === a ? `<span class="ok-t">✓</span>` : `<span class="bad-t">✗ answer ${a}</span>`) : "";
+    return `<div class="mod" style="align-items:center"><b style="width:34px">${i}.</b>${"ABC".split("").map(L => `<button class="btn ${v === L ? (L === a ? "pri" : "") : ""}" ${v === L && L !== a ? 'style="border-color:var(--bad);color:var(--bad)"' : ""} data-i="${i}" data-v="${L}">${L}</button>`).join("")}<span class="sp"></span>${res}</div>`; };
+  $("pane").innerHTML = `<div class="card"><span class="tag">Book practice · Vol ${t.vol}</span><h3 style="margin:4px 0">LM${n} · ${esc(m.t)}</h3>
+    <p style="margin:6px 0">Open <b>Volume ${t.vol}</b> at <b>PDF page ${P.pp}</b> (Practice Problems). Work each problem, then tap your answer. Solutions start at <b>PDF page ${P.sol}</b>.</p>
+    <div id="bv" style="margin:10px 0"></div><p class="pill" id="sc"></p>${Array.from({length: P.n}, (_, k) => row(k + 1)).join("")}
+    <div class="row"><button class="btn" id="bk">← Modules</button><span class="sp"></span><button class="btn" id="clr">Clear answers</button></div></div>`;
+  const score = () => { let done = 0, ok = 0, wrong = []; for (let i = 1; i <= P.n; i++) { const v = S.pp[t.id + ":" + n + ":" + i]; if (v) { done++; if (v === "ok" || v === P.a[i - 1]) ok++; else wrong.push(i); } }
+    $("sc").textContent = done ? `Score ${ok}/${done} (${Math.round(100 * ok / done)}%)${wrong.length ? ` · review problems ${wrong.join(", ")} using the solutions` : ""}` : `${P.n} problems`; };
+  $("pane").querySelectorAll("button[data-i]").forEach(b => b.onclick = () => { S.pp[t.id + ":" + n + ":" + b.dataset.i] = b.dataset.v; save(); const y = window.scrollY, bv = $("bv"); panePractice._keep = true; panePractice(t, n); panePractice._keep = false; $("bv").replaceWith(bv); window.scrollTo(0, y); });
+  $("bk").onclick = () => paneMods(t);
+  $("clr").onclick = () => { for (let i = 1; i <= P.n; i++) delete S.pp[t.id + ":" + n + ":" + i]; save(); panePractice(t, n); };
+  score();
+  if (!panePractice._keep) bookViewer(t, n, P);
+}
+
+
+/* ---------- user's own PDF, rendered locally (never uploaded) ---------- */
+const PDFS = {}; let ZOOM = 1;
+const PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
+function loadScript(src){ return new Promise((ok, no) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = no; document.head.appendChild(s); }); }
+async function pdfLib(){ if (!window.pdfjsLib) { await loadScript(PDFJS + "pdf.min.js"); pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + "pdf.worker.min.js"; } return window.pdfjsLib; }
+function idb(){ return new Promise((ok, no) => { try { const r = indexedDB.open("cfa-pdfs", 1); r.onupgradeneeded = () => r.result.createObjectStore("v"); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); } catch (e) { no(e); } }); }
+async function idbGet(k){ try { const db = await idb(); return await new Promise(ok => { const q = db.transaction("v").objectStore("v").get(k); q.onsuccess = () => ok(q.result); q.onerror = () => ok(null); }); } catch (e) { return null; } }
+async function idbPut(k, v){ try { const db = await idb(); db.transaction("v", "readwrite").objectStore("v").put(v, k); } catch (e) {} }
+async function getPdf(vol){ if (PDFS[vol]) return PDFS[vol]; const buf = await idbGet("vol" + vol); if (!buf) return null; const lib = await pdfLib(); PDFS[vol] = await lib.getDocument({data: buf.slice(0)}).promise; return PDFS[vol]; }
+async function renderPages(el, doc, from, to){
+  el.innerHTML = "";
+  const w = Math.min(el.clientWidth || 360, 900) * ZOOM;
+  for (let i = from; i <= Math.min(to, doc.numPages); i++) {
+    const page = await doc.getPage(i), v1 = page.getViewport({scale: 1}), scale = (w / v1.width) * (window.devicePixelRatio || 1);
+    const vp = page.getViewport({scale}), c = document.createElement("canvas");
+    c.width = vp.width; c.height = vp.height; c.style.width = (100 * ZOOM) + "%"; c.style.border = "1px solid var(--line)"; c.style.borderRadius = "6px"; c.style.marginBottom = "8px"; c.style.background = "#fff";
+    el.appendChild(c); await page.render({canvasContext: c.getContext("2d"), viewport: vp}).promise;
+  }
+}
+async function bookViewer(t, n, P){
+  const box = $("bv"); if (!box) return;
+  const doc = await getPdf(t.vol);
+  if (!doc) {
+    box.innerHTML = `<div class="exp">Show the problems here: pick your <b>Volume ${t.vol}</b> PDF once. It stays on this device only, nothing is uploaded.<div class="row"><input type="file" accept="application/pdf" id="pf"></div></div>`;
+    $("pf").onchange = async e => { const f = e.target.files[0]; if (!f) return; box.innerHTML = `<p class="pill">Loading PDF…</p>`;
+      try { const buf = await f.arrayBuffer(); await idbPut("vol" + t.vol, buf); const lib = await pdfLib(); PDFS[t.vol] = await lib.getDocument({data: buf.slice(0)}).promise; bookViewer(t, n, P); }
+      catch (err) { box.innerHTML = `<p class="bad-t">Could not open that PDF.</p>`; } };
+    return;
+  }
+  let mode = "q";
+  const draw = async () => {
+    box.innerHTML = `<div class="row" style="margin:0 0 8px"><button class="btn ${mode === "q" ? "pri" : ""}" id="vq">Problems</button><button class="btn ${mode === "s" ? "pri" : ""}" id="vs">Solutions</button><button class="btn" id="vz">Zoom ${ZOOM > 1 ? "−" : "+"}</button><span class="sp"></span><button class="btn" id="vx">Change PDF</button></div><div id="vp" style="max-height:65vh;overflow:auto;border-radius:8px"><p class="pill">Rendering…</p></div>`;
+    $("vz").onclick = () => { ZOOM = ZOOM > 1 ? 1 : 1.8; draw(); }; $("vq").onclick = () => { mode = "q"; draw(); }; $("vs").onclick = () => { mode = "s"; draw(); };
+    $("vx").onclick = async () => { delete PDFS[t.vol]; await idbPut("vol" + t.vol, null); bookViewer(t, n, P); };
+    const span = Math.max(1, P.sol - P.pp);
+    try { mode === "q" ? await renderPages($("vp"), doc, P.pp, P.sol) : await renderPages($("vp"), doc, P.sol, P.sol + Math.min(span + 1, 8)); }
+    catch (e) { $("vp").innerHTML = `<p class="bad-t">Could not render pages. Is this the 2026 Volume ${t.vol} PDF?</p>`; }
+  };
+  draw();
 }
 
 /* ---------- flashcards ---------- */
@@ -221,7 +308,7 @@ function paneCards(t, n){
     if ($("gd")) $("gd").onclick = () => { S.cards[c.key] = Math.min(3, sc + 1); save(); next(); };
   }
   function flip(){ flipped = !flipped; draw(); }
-  function next(){ if (k < deck.length - 1) { k++; flipped = false; draw(); } else { p.innerHTML = `<div class="card"><b>Deck done.</b><div class="row"><button class="btn pri" id="again">Go again</button></div></div>`; $("again").onclick = () => paneCards(t, n); } }
+  function next(){ if (k < deck.length - 1) { k++; flipped = false; draw(); } else { p.innerHTML = `<div class="card"><b>Deck done.</b><div class="row"><button class="btn" id="again">Go again</button>${n != null ? `<button class="btn pri" id="toQ">③ Quiz →</button>` : ""}</div></div>`; $("again").onclick = () => paneCards(t, n); if ($("toQ")) $("toQ").onclick = () => paneQuiz(t, n); } }
   document.onkeydown = e => { if (!$("fc")) return; if (e.code === "Space") { e.preventDefault(); flip(); } if (e.key === "ArrowRight") next(); };
   draw();
 }
@@ -254,8 +341,8 @@ function runQuiz(el, items, onDone, timed){
 function paneQuiz(t, n){
   const items = shuffle(qs(t).filter(x => n == null || x.q[0] === n));
   runQuiz($("pane"), items, (s, tot, res) => {
-    $("pane").innerHTML = `<div class="card"><div class="big">${s}/${tot}</div><p class="sub">${Math.round(100 * s / tot)}%${n != null ? ` on LM${n}` : ""}</p><div class="row"><button class="btn pri" id="rt">Retake</button><button class="btn" onclick="go('review')">Review mistakes</button></div></div>`;
-    $("rt").onclick = () => paneQuiz(t, n);
+    $("pane").innerHTML = `<div class="card"><div class="big">${s}/${tot}</div><p class="sub">${Math.round(100 * s / tot)}%${n != null ? ` on LM${n}` : ""}</p><div class="row"><button class="btn pri" id="rt">Retake</button>${n != null ? `<button class="btn" id="bm">← Modules</button>` : ""}${n != null && pinfo(t, n) ? `<button class="btn pri" id="bp">④ Book practice →</button>` : ""}<button class="btn" onclick="go('review')">Review mistakes</button></div></div>`;
+    $("rt").onclick = () => paneQuiz(t, n); if ($("bm")) $("bm").onclick = () => paneMods(t); if ($("bp")) $("bp").onclick = () => panePractice(t, n);
   });
 }
 
@@ -286,10 +373,11 @@ function formulas(){
   $("fs").oninput = e => draw(e.target.value); draw("");
 }
 
+function ppWrong(){ const out = []; D.topics.forEach(t => Object.keys((D.P || {})[t.id] || {}).forEach(n => { const P = D.P[t.id][n], w = []; for (let i = 1; i <= P.n; i++) { const v = S.pp[t.id + ":" + n + ":" + i]; if (v && v !== "ok" && v !== P.a[i - 1]) w.push(i); } if (w.length) out.push(`<tr><td>${esc(t.name)} LM${n}</td><td>Vol ${t.vol}, solutions from PDF p. ${P.sol}</td><td>#${w.join(", #")}</td></tr>`); })); return out.length ? `<h3 style="margin-top:24px">Book practice to review</h3><div class="card"><table>${out.join("")}</table></div>` : ""; }
 function review(){
   const items = S.wrong.map(k => { const [id, i] = k.split(":"); const t = topic(id); return t && D.Q[id] && D.Q[id][+i] ? {t, q: D.Q[id][+i], i: +i, key: k} : null; }).filter(Boolean);
-  if (!items.length) { app.innerHTML = `<h2>Mistakes</h2><div class="card">No open mistakes. Questions you miss appear here until you answer them correctly.</div>`; return; }
-  app.innerHTML = `<h2>Mistakes</h2><p class="sub">${items.length} question(s) to redo.</p><div id="rv"></div>`;
+  if (!items.length) { app.innerHTML = `<h2>Mistakes</h2><div class="card">No open app-quiz mistakes.</div>` + ppWrong(); return; }
+  app.innerHTML = `<h2>Mistakes</h2><p class="sub">${items.length} question(s) to redo.</p><div id="rv"></div>` + ppWrong();
   runQuiz($("rv"), shuffle(items), (s, n) => { $("rv").innerHTML = `<div class="card"><div class="big">${s}/${n}</div><p class="sub">${S.wrong.length} remaining.</p><div class="row"><button class="btn pri" onclick="go('review')">Continue</button></div></div>`; });
 }
 
